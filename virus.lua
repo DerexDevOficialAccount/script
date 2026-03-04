@@ -1,193 +1,110 @@
 local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
--- ====================================================
 -- SERVIÇOS
--- ====================================================
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local localPlayer = Players.LocalPlayer
+local lp = Players.LocalPlayer
 local catchEvent = ReplicatedStorage:WaitForChild("Events"):WaitForChild("CatchBall")
 
--- ====================================================
--- ESTADO GLOBAL DO SCRIPT
--- ====================================================
 local state = {
-    runningSounds = false,
-    flying = false,
-    flySpeed = 50,
-    bodyVelocity = nil,
-    bodyGyro = nil,
-    -- Atributos
-    walkSpeed = 16,
-    jumpPower = 50,
-    enforceHumanoid = true,
-    -- Bigfoot (Pernas Reais Expandidas)
-    bigfootEnabled = false,
-    hitboxSize = 10,
-    hitboxTransparency = 0.7
+    speed = 16, jump = 50,
+    fly = false, flySpd = 50,
+    bigfoot = false, bfSize = 10, bfTrans = 0.7
 }
 
--- ====================================================
--- LÓGICA DO BIGFOOT (RUNSERVICE STEPPED)
--- ====================================================
--- O Stepped roda antes da física, impedindo que a colisão gigante te empurre
 RunService.Stepped:Connect(function()
-    local char = localPlayer.Character
-    if char and state.bigfootEnabled then
-        local legs = {
-            char:FindFirstChild("Left Leg"), 
-            char:FindFirstChild("Right Leg"),
-            char:FindFirstChild("LeftLowerLeg"), -- R15
-            char:FindFirstChild("RightLowerLeg") -- R15
-        }
+    local char = lp.Character
+    if not char then return end
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.WalkSpeed = state.speed
+        hum.JumpPower = state.jump
+        hum.UseJumpPower = true
+    end
 
-        for _, leg in pairs(legs) do
-            if leg and leg:IsA("BasePart") then
-                leg.Size = Vector3.new(state.hitboxSize, state.hitboxSize, state.hitboxSize)
-                leg.Transparency = state.hitboxTransparency
-                leg.CanCollide = false -- Impede de bugar no chão
-                leg.Massless = true    -- Tira o peso da peça gigante
+    if state.bigfoot then
+        for _, v in ipairs(char:GetChildren()) do
+            if v:IsA("BasePart") and (v.Name:find("Leg") or v.Name:find("Foot")) then
+                v.Size = Vector3.new(state.bfSize, state.bfSize, state.bfSize)
+                v.Transparency = state.bfTrans
+                v.CanCollide = false
+                v.Massless = true
             end
         end
     end
 end)
 
--- ====================================================
--- LOOP DE PERSISTÊNCIA (HUMANOID E RESET)
--- ====================================================
-task.spawn(function()
-    while true do
-        local char = localPlayer.Character
-        if char then
-            local hum = char:FindFirstChild("Humanoid")
+-- SISTEMA DE VOO
+local function handleFly()
+    local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not root or not state.fly then return end
+    
+    local bv = Instance.new("BodyVelocity", root)
+    local bg = Instance.new("BodyGyro", root)
+    bv.MaxForce, bg.MaxTorque = Vector3.new(1,1,1)*1e6, Vector3.new(1,1,1)*1e6
+
+    task.spawn(function()
+        while state.fly and root.Parent do
+            local cam = workspace.CurrentCamera.CFrame
+            local dir = Vector3.zero
+            if UserInputService:IsKeyDown("W") then dir += cam.LookVector end
+            if UserInputService:IsKeyDown("S") then dir -= cam.LookVector end
+            if UserInputService:IsKeyDown("A") then dir -= cam.RightVector end
+            if UserInputService:IsKeyDown("D") then dir += cam.RightVector end
             
-            -- Mantém WalkSpeed e JumpPower
-            if hum and state.enforceHumanoid then
-                hum.WalkSpeed = state.walkSpeed
-                hum.UseJumpPower = true
-                hum.JumpPower = state.jumpPower
-            end
-
-            -- Reseta as pernas quando o Bigfoot é desligado
-            if not state.bigfootEnabled then
-                local legs = {
-                    char:FindFirstChild("Left Leg"), char:FindFirstChild("Right Leg"),
-                    char:FindFirstChild("LeftLowerLeg"), char:FindFirstChild("RightLowerLeg")
-                }
-                for _, leg in pairs(legs) do
-                    if leg and leg:IsA("BasePart") then
-                        -- Só reseta se o tamanho estiver diferente do padrão
-                        if leg.Size.Y > 2.1 or leg.Size.Y < 1 then 
-                            leg.Transparency = 0
-                            leg.CanCollide = true
-                            if leg.Name:find("Lower") then
-                                leg.Size = Vector3.new(1, 1, 1)
-                            else
-                                leg.Size = Vector3.new(1, 2, 1)
-                            end
-                        end
-                    end
-                end
-            end
+            bv.Velocity = dir * state.flySpd
+            bg.CFrame = cam
+            task.wait()
         end
-        task.wait(0.3)
-    end
-end)
-
--- ====================================================
--- SISTEMA DE VOO (FLY)
--- ====================================================
-local function toggleFly()
-    state.flying = not state.flying
-    local char = localPlayer.Character
-    local humRoot = char and char:FindFirstChild("HumanoidRootPart")
-    if not humRoot then return end
-
-    if state.flying then
-        local bv = Instance.new("BodyVelocity", humRoot)
-        bv.Name = "SamlFly_Vel"
-        bv.MaxForce = Vector3.new(1, 1, 1) * math.huge
-        
-        local bg = Instance.new("BodyGyro", humRoot)
-        bg.Name = "SamlFly_Gyro"
-        bg.MaxTorque = Vector3.new(1, 1, 1) * math.huge
-
-        task.spawn(function()
-            while state.flying do
-                local camera = workspace.CurrentCamera
-                local moveDir = Vector3.new(0,0,0)
-                if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir += camera.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir -= camera.CFrame.LookVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir -= camera.CFrame.RightVector end
-                if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir += camera.CFrame.RightVector end
-                
-                bv.Velocity = moveDir * state.flySpeed
-                bg.CFrame = camera.CFrame
-                task.wait()
-            end
-            bv:Destroy()
-            bg:Destroy()
-        end)
-    end
+        bv:Destroy(); bg:Destroy()
+    end)
 end
 
--- ====================================================
--- INTERFACE (WindUI)
--- ====================================================
-WindUI:Popup({
-    Title = "SAML EXPLOIT",
-    Content = "Script carregado com sucesso. Use os Inputs para configurar.",
-    Buttons = { { Title = "OK", Variant = "Primary" } }
-})
-
 local Window = WindUI:CreateWindow({
-    Title = "Saml Exploit Ultimate",
-    Icon = "shield-check",
+    Title = "MPS ULTIMATE EXPLOIT TOOL",
+    Icon = "zap",
     Author = "by galerinhadozap",
-    Size = UDim2.fromOffset(580, 460),
-    KeySystem = { Key = { "FriendKey" }, Note = "Key System", SaveKey = true }
+    Size = UDim2.fromOffset(550, 500)
 })
 
-local TabExploits = Window:Tab({ Title = "Exploits", Icon = "bird" })
-local TabHitbox = Window:Tab({ Title = "Hitbox", Icon = "maximize" })
-local TabPlayer = Window:Tab({ Title = "Player", Icon = "user" })
+-- ABAS
+local TabCBM = Window:Tab({ Title = "CBM", Icon = "target" })
+local TabSAML = Window:Tab({ Title = "SAML", Icon = "box" })
 local TabSettings = Window:Tab({ Title = "Settings", Icon = "settings" })
 
--- --- TAB EXPLOITS ---
-TabExploits:Section({ Title = "Ações da Bola" })
-TabExploits:Button({ Title = "Force Catch Ball (SAML)", Callback = function()
-    local ball = Workspace:FindFirstChild("Debris") and Workspace.Debris:FindFirstChild("Balls") and Workspace.Debris.Balls:FindFirstChild("SAML")
+TabCBM:Section({ Title = "Módulo CBM" })
+TabCBM:Paragraph({ Title = "Aguardando Implementação", Content = "Esta categoria está pronta para novos scripts CBM." })
+
+TabSAML:Section({ Title = "Ações Automáticas" })
+TabSAML:Button({ Title = "Force Catch Ball", Callback = function()
+    local ball = workspace:FindFirstChild("SAML", true) or workspace:FindFirstChild("Ball", true)
     if ball then catchEvent:FireServer(ball) end
 end })
 
-TabExploits:Section({ Title = "Sons" })
-TabExploits:Button({ Title = "Play All Sounds", Callback = function()
-    for _, s in ipairs(Workspace:GetDescendants()) do if s:IsA("Sound") then s.Looped = true; pcall(function() s:Play() end) end end
+TabSAML:Button({ Title = "Play All Sounds (Troll)", Callback = function()
+    for _, s in ipairs(workspace:GetDescendants()) do 
+        if s:IsA("Sound") then s.Looped = true; pcall(function() s:Play() end) end 
+    end
 end })
 
--- --- TAB HITBOX (BIGFOOT COM INPUT) ---
-TabHitbox:Section({ Title = "Configuração do Bigfoot" })
-TabHitbox:Toggle({ Title = "Ativar Bigfoot", Default = false, Callback = function(t) state.bigfootEnabled = t end })
-TabHitbox:Input({ Title = "Tamanho da Hitbox", Placeholder = "Padrão: 10", Callback = function(v) state.hitboxSize = tonumber(v) or 10 end })
-TabHitbox:Input({ Title = "Transparência (0-100)", Placeholder = "Padrão: 70", Callback = function(v) state.hitboxTransparency = (tonumber(v) or 70) / 100 end })
+TabSAML:Section({ Title = "Visual & Hitbox" })
+TabSAML:Toggle({ Title = "Bigfoot Mode", Callback = function(v) state.bigfoot = v end })
+TabSAML:Slider({ Title = "Tamanho Hitbox", Min = 2, Max = 50, Default = 10, Callback = function(v) state.bfSize = v end })
 
--- --- TAB PLAYER (INPUTS) ---
-TabPlayer:Section({ Title = "Movimentação" })
-TabPlayer:Input({ Title = "WalkSpeed", Placeholder = "16", Callback = function(v) state.walkSpeed = tonumber(v) or 16 end })
-TabPlayer:Input({ Title = "JumpPower", Placeholder = "50", Callback = function(v) state.jumpPower = tonumber(v) or 50 end })
-TabPlayer:Section({ Title = "Voo" })
-TabPlayer:Toggle({ Title = "Ativar Fly", Callback = toggleFly })
-TabPlayer:Input({ Title = "Velocidade do Voo", Placeholder = "50", Callback = function(v) state.flySpeed = tonumber(v) or 50 end })
+TabSettings:Section({ Title = "Movimentação" })
+TabSettings:Slider({ Title = "WalkSpeed", Min = 16, Max = 200, Default = 16, Callback = function(v) state.speed = v end })
+TabSettings:Slider({ Title = "JumpPower", Min = 50, Max = 300, Default = 50, Callback = function(v) state.jump = v end })
 
--- --- TAB SETTINGS ---
+TabSettings:Section({ Title = "Voo (Fly)" })
+TabSettings:Toggle({ Title = "Ativar Fly", Callback = function(v) state.fly = v; if v then handleFly() end end })
+TabSettings:Slider({ Title = "Velocidade Fly", Min = 10, Max = 300, Default = 50, Callback = function(v) state.flySpd = v end })
+
+TabSettings:Section({ Title = "Menu Config" })
 TabSettings:Keybind({ Title = "Esconder Menu", Default = Enum.KeyCode.RightControl, Callback = function() Window:Toggle() end })
-TabSettings:Button({ Title = "Unload Script", Color = Color3.fromHex("#ff4444"), Callback = function()
-    state.enforceHumanoid = false; state.bigfootEnabled = false; state.flying = false
-    Window:Close()
-end })
+TabSettings:Button({ Title = "Unload Script", Color = Color3.fromHex("#ff4444"), Callback = function() Window:Close() end })
 
-WindUI:Notify({ Title = "Saml Exploit", Content = "Script pronto para uso!", Duration = 5 })
+WindUI:Notify({ Title = "Carregado", Content = "Script SAML pronto!", Duration = 3 })
